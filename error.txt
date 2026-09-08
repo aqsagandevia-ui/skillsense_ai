@@ -1,0 +1,1 @@
+⚠️ MongoDB not connected - skipping user online status update

@@ -1,0 +1,6 @@
+[dotenv@17.2.3] injecting env (0) from .env -- tip: 🔄 add secrets lifecycle management: https://dotenvx.com/ops
+🚀 Server & Socket running on port 5000
+❌ MongoDB Connection Error: The `uri` parameter to `openUri()` must be a string, got "undefined". Make sure the first parameter to `mongoose.connect()` or `mongoose.createConnection()` is a string.
+❌ MongoDB error: The `uri` parameter to `openUri()` must be a string, got "undefined". Make sure the first parameter to `mongoose.connect()` or `mongoose.createConnection()` is a string.
+🟢 Client connected: kUgQrMNkHaeUL6dwAAAB
+✅ User 69ac0294757bb4b17bf56309 is now online (DB unavailable)
