@@ -25,15 +25,15 @@ export default function SkillDetails() {
   };
 
   // Use real mentors from the database
-  const mentors = allMentors.length > 0 
+  const mentors = allMentors.length > 0
     ? allMentors.map(m => ({
-        id: m.user?._id,
-        name: m.user?.name || "Unknown",
-        exp: `${m.experienceLevel} • ${m.user?.yearsOfExperience || 0} years experience`,
-        img: m.user?.photo,
-        user: m.user,
-        fullMentor: m
-      }))
+      id: m.user?._id,
+      name: m.user?.name || "Unknown",
+      exp: `${m.experienceLevel} • ${m.user?.yearsOfExperience || 0} years experience`,
+      img: m.user?.photo,
+      user: m.user,
+      fullMentor: m
+    }))
     : [];
 
   // Request modal state
@@ -80,10 +80,10 @@ export default function SkillDetails() {
       if (!mentorUserId) {
         throw new Error('Mentor ID not found');
       }
-      const body = { 
-        teacherId: mentorUserId, 
-        skill: skillData?.skillName || skill.title, 
-        message: requestMessage 
+      const body = {
+        teacherId: mentorUserId,
+        skill: skillData?.skillName || skill.title,
+        message: requestMessage
       };
       const res = await fetch('/api/session', {
         method: 'POST',
