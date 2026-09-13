@@ -20,6 +20,7 @@ const skillRoutes = require("./routes/skillRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const reviewRoutes = require("./routes/reviewRoutes");
 const calendarRoutes = require("./routes/calendarRoutes");
+const groupRoutes = require("./routes/groupRoutes");
 
 // =====================
 // App & Server
@@ -48,10 +49,9 @@ app.use(
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-// Security headers for COOP policy (fixes popup issues)
+// Avoid forcing COOP/COEP on the whole app. Firebase/Google popup auth
+// can fail when the browser is told to use restrictive opener policies.
 app.use((req, res, next) => {
-  res.setHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
-  res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
   next();
 });
 
@@ -66,6 +66,7 @@ app.use("/api/ai", aiMatchRoutes);
 app.use("/api/session", sessionRoutes);
 app.use("/api/reviews", reviewRoutes);
 app.use("/api/calendar", calendarRoutes);
+app.use("/api/groups", groupRoutes);
 
 app.use("/api/skills", skillRoutes);
 app.use("/api/admin", adminRoutes);
@@ -139,6 +140,16 @@ mongoose.connection.on("reconnected", () => {
 // Server Start
 // =====================
 const PORT = process.env.PORT || 5000;
+
+server.on("error", (err) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(`❌ Port ${PORT} is already in use. Close the existing process or change PORT in server/.env.`);
+    process.exit(1);
+  }
+
+  console.error("❌ Failed to start server:", err.message);
+  process.exit(1);
+});
 
 server.listen(PORT, () => {
   console.log(`🚀 Server & Socket running on port ${PORT}`);

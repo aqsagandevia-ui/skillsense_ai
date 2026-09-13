@@ -1,6 +1,7 @@
 const { Server } = require("socket.io");
 const jwt = require('jsonwebtoken');
 const Message = require("./models/Message");
+const Group = require("./models/Group");
 const mongoose = require("mongoose");
 
 // Helper function to convert string to ObjectId
@@ -55,10 +56,10 @@ const socketServer = (server) => {
         const wasAlreadyOnline = onlineUsers.has(userId);
         onlineUsers.set(userId, socket.id);
         socket.userId = userId;
-        
+
         // Store userId in socket for later reference
         socket.join(`user_${userId}`);
-        
+
         // Only broadcast if user wasn't already online
         if (!wasAlreadyOnline) {
           io.emit("user_status_change", { userId, isOnline: true });
@@ -72,7 +73,7 @@ const socketServer = (server) => {
       if (userId) {
         onlineUsers.delete(userId);
         socket.leave(`user_${userId}`);
-        
+
         // Broadcast user status to all clients
         io.emit("user_status_change", { userId, isOnline: false });
         console.log(`❌ User ${userId} is offline`);
@@ -91,6 +92,18 @@ const socketServer = (server) => {
       socket.join(roomId);
       console.log(`👥 User ${sid} joined chat room: ${roomId}`);
       console.log(`   Socket rooms:`, socket.rooms);
+    });
+
+    socket.on("group:join", ({ groupId }) => {
+      if (!groupId) return;
+      socket.join(`group:${groupId}`);
+      console.log(`👥 User ${socket.userId || "anonymous"} joined group room: group:${groupId}`);
+    });
+
+    socket.on("group:leave", ({ groupId }) => {
+      if (!groupId) return;
+      socket.leave(`group:${groupId}`);
+      console.log(`👤 User ${socket.userId || "anonymous"} left group room: group:${groupId}`);
     });
 
     // Leave a specific chat room
@@ -201,6 +214,76 @@ const socketServer = (server) => {
         console.error("❌ Error sending message:", err);
         socket.emit("message_error", { error: err.message });
       }
+    });
+
+    socket.on("group:message", async ({ groupId, content, senderId, clientMessageId }) => {
+      try {
+        const sender = socket.userId || senderId;
+        if (!groupId || !sender) return;
+
+        const group = await Group.findById(groupId).populate("members.userId", "_id name photo email");
+        if (!group) {
+          socket.emit("group:message:error", { error: "Group not found" });
+          return;
+        }
+
+        const recipientIds = [...new Set((group.members || []).map((member) => {
+          const id = member?.userId && typeof member.userId === "object" ? String(member.userId._id || member.userId) : String(member?.userId || "");
+          return id || null;
+        }).filter(Boolean))];
+
+        const payloadContent = content && content.trim() ? content.trim().slice(0, 3000) : "";
+        if (!payloadContent) {
+          socket.emit("group:message:error", { error: "Message cannot be empty" });
+          return;
+        }
+
+        const message = await Message.create({
+          sender: toObjectId(sender),
+          group: toObjectId(groupId),
+          content: payloadContent,
+          type: "group",
+          recipients: recipientIds.map(toObjectId),
+          clientMessageId,
+          isRead: false,
+        });
+
+        const populated = await Message.findById(message._id).populate("sender", "name photo email");
+        const payload = {
+          _id: populated._id.toString(),
+          sender: populated.sender,
+          group: groupId,
+          content: populated.content,
+          type: "group",
+          createdAt: populated.createdAt,
+          clientMessageId,
+        };
+
+        io.to(`group:${groupId}`).emit("group:message", payload);
+
+        for (const memberId of recipientIds) {
+          io.to(`user_${memberId}`).emit("group:message", payload);
+        }
+
+        group.lastMessage = payloadContent;
+        group.lastMessageAt = new Date();
+        await group.save();
+      } catch (err) {
+        console.error("Error processing group message:", err);
+        socket.emit("group:message:error", { error: err.message });
+      }
+    });
+
+    socket.on("group:typing", ({ groupId, senderId }) => {
+      const sid = socket.userId || senderId;
+      if (!groupId || !sid) return;
+      socket.to(`group:${groupId}`).emit("group:typing", { groupId, senderId: sid, isTyping: true });
+    });
+
+    socket.on("group:stopTyping", ({ groupId, senderId }) => {
+      const sid = socket.userId || senderId;
+      if (!groupId || !sid) return;
+      socket.to(`group:${groupId}`).emit("group:typing", { groupId, senderId: sid, isTyping: false });
     });
 
     // Handle typing indicator

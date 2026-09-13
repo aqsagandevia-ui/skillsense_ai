@@ -53,12 +53,12 @@ export default function MentorReviews() {
         <div className="mb-6 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold text-slate-900">Mentor Reviews</h1>
-            <p className="text-slate-500 mt-1">See all of your learner feedback and rating trends.</p>
+            <p className="text-slate-500 mt-1">See all learner feedback and track your rating trends.</p>
           </div>
           <div className="flex flex-wrap gap-3">
             <Button onClick={() => navigate('/mentor-dashboard')} className="bg-white text-slate-700 border border-slate-300">Back to Dashboard</Button>
             <Button onClick={() => setRatingFilter('all')} className={ratingFilter === 'all' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-700 border'}>All</Button>
-            {[5,4,3,2,1].map((value) => (
+            {[5, 4, 3, 2, 1].map((value) => (
               <Button
                 key={value}
                 onClick={() => setRatingFilter(value.toString())}
@@ -76,11 +76,11 @@ export default function MentorReviews() {
 
         <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
           <div className="space-y-4">
-            <Card>
+            <Card className="bg-gradient-to-br from-indigo-600 to-violet-600 text-white border-none shadow-lg">
               <div className="space-y-2">
-                <div className="text-sm text-slate-500">Average Rating</div>
-                <div className="text-4xl font-bold text-slate-900">{stats?.averageRating ?? 'N/A'}★</div>
-                <div className="text-sm text-slate-500">{stats?.totalReviews ?? 0} reviews</div>
+                <div className="text-sm text-indigo-100">Average Rating</div>
+                <div className="text-4xl font-bold">{stats?.averageRating ?? 'N/A'}★</div>
+                <div className="text-sm text-indigo-100">{stats?.totalReviews ?? 0} reviews</div>
               </div>
             </Card>
             <Card>
@@ -88,10 +88,10 @@ export default function MentorReviews() {
               <div className="space-y-3">
                 {stats?.ratingDistribution?.map((item) => (
                   <div key={item.rating} className="flex items-center gap-3">
-                    <div className="w-12 text-sm text-slate-600">{item.rating}★</div>
-                    <div className="h-3 flex-1 overflow-hidden rounded-full bg-slate-100">
+                    <div className="w-12 text-sm font-medium text-slate-600">{item.rating}★</div>
+                    <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-100">
                       <div
-                        className="h-full rounded-full bg-indigo-500"
+                        className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500"
                         style={{ width: `${stats.totalReviews ? (item.count / stats.totalReviews) * 100 : 0}%` }}
                       />
                     </div>

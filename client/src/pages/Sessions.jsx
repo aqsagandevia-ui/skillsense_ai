@@ -25,8 +25,29 @@ export default function Sessions() {
   const [form, setForm] = useState({
     date: "",
     time: "",
+    duration: 60,
     meetingLink: ""
   });
+
+  const getSessionParticipants = (session) => {
+    const participants = [];
+    const seen = new Set();
+
+    const addParticipant = (person) => {
+      if (!person) return;
+      const id = person._id || person.id;
+      if (!id || seen.has(String(id))) return;
+      seen.add(String(id));
+      participants.push(person);
+    };
+
+    addParticipant(session?.learner);
+    if (Array.isArray(session?.learners)) {
+      session.learners.forEach(addParticipant);
+    }
+
+    return participants;
+  };
 
   const fetchSessions = async () => {
     const token = localStorage.getItem("token");
@@ -47,7 +68,14 @@ export default function Sessions() {
     if (user && user.role === 'mentor') {
       setSessions(data.filter((s) => String(s.mentor?._id || s.mentor) === String(user._id)));
     } else {
-      setSessions(data.filter((s) => String(s.learner?._id || s.learner) === String(user?._id)));
+      const userId = String(user?._id || user?.id || '');
+      setSessions(data.filter((s) => {
+        if (!userId) return false;
+        const sessionParticipants = getSessionParticipants(s);
+        const isCurrentLearner = String(s.learner?._id || s.learner) === userId;
+        const isInLearnersList = sessionParticipants.some((participant) => String(participant?._id || participant) === userId);
+        return isCurrentLearner || isInLearnersList;
+      }));
     }
   };
 
@@ -58,6 +86,12 @@ export default function Sessions() {
     // Wait for user to be available (AuthProvider may load asynchronously)
     if (!user) return;
     init();
+
+    const liveRefresh = setInterval(() => {
+      fetchSessions();
+    }, 30000);
+
+    return () => clearInterval(liveRefresh);
   }, [user]);
 
   const openModal = async (session) => {
@@ -102,8 +136,13 @@ export default function Sessions() {
       return;
     }
     const selected = new Date(`${form.date}T${form.time}`);
+    const duration = Number(form.duration);
     if (isNaN(selected.getTime()) || selected <= new Date()) {
       toast.error('Please select a future date and time');
+      return;
+    }
+    if (!Number.isFinite(duration) || duration < 15 || duration > 240) {
+      toast.error('Please select a valid session duration between 15 and 240 minutes');
       return;
     }
 
@@ -114,7 +153,7 @@ export default function Sessions() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ date: form.date, time: form.time, meetingLink: form.meetingLink })
+        body: JSON.stringify({ date: form.date, time: form.time, duration, meetingLink: form.meetingLink })
       });
 
       if (!res.ok) {
@@ -170,6 +209,37 @@ export default function Sessions() {
     } finally {
       setRequestLoading(false);
     }
+  };
+
+  const resolveSessionState = (session) => {
+    const start = session?.startTime ? new Date(session.startTime) : session?.scheduledAt ? new Date(session.scheduledAt) : null;
+    const end = session?.endTime ? new Date(session.endTime) : null;
+    const now = new Date();
+
+    if (session?.status === 'cancelled') {
+      return { label: 'Cancelled', isUpcoming: false, isLive: false, isCompleted: false, joinAllowed: false, joinMessage: 'This session was cancelled.' };
+    }
+
+    if (!start || !end) {
+      return { label: 'Upcoming', isUpcoming: true, isLive: false, isCompleted: false, joinAllowed: false, joinMessage: 'Join available at ' + (start ? start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : 'session time') };
+    }
+
+    if (now < start) {
+      return { label: 'Upcoming', isUpcoming: true, isLive: false, isCompleted: false, joinAllowed: false, joinMessage: 'Join available at ' + start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) };
+    }
+
+    if (now >= start && now < end) {
+      return { label: 'Live', isUpcoming: false, isLive: true, isCompleted: false, joinAllowed: true, joinMessage: 'Join Session' };
+    }
+
+    return { label: 'Completed', isUpcoming: false, isLive: false, isCompleted: true, joinAllowed: false, joinMessage: 'Session has ended' };
+  };
+
+  const isSessionCompleted = (session) => {
+    if (!session) return false;
+    if (session.status === 'completed') return true;
+    const sessionState = resolveSessionState(session);
+    return sessionState.isCompleted;
   };
 
   const openReviewModal = async (session) => {
@@ -233,17 +303,20 @@ export default function Sessions() {
             {mentorPending.length === 0 ? (
               <div className="text-slate-600">No pending requests.</div>
             ) : (
-              mentorPending.map((session) => (
-                <div key={session._id} className="bg-white shadow rounded-xl p-5 mb-4">
-                  <h2 className="font-semibold text-xl">{session.learner?.name}</h2>
-                  <p>{session.skillTopic?.skillName}</p>
-                  <p className="text-sm text-slate-500">Requested: {new Date(session.createdAt).toLocaleDateString()}</p>
-                  <div className="mt-4 flex flex-wrap gap-3">
-                    <button onClick={() => openModal(session)} className="px-5 py-2 bg-gradient-to-r from-indigo-500 to-violet-600 text-white rounded-lg">Schedule Session</button>
-                    <button onClick={() => rejectRequest(session)} className="px-5 py-2 bg-red-500 text-white rounded-lg">Reject</button>
+              mentorPending.map((session) => {
+                const participants = getSessionParticipants(session);
+                return (
+                  <div key={session._id} className="bg-white shadow rounded-xl p-5 mb-4">
+                    <h2 className="font-semibold text-xl">{participants.map((person) => person.name).join(', ') || session.learner?.name}</h2>
+                    <p>{session.skillTopic?.skillName}</p>
+                    <p className="text-sm text-slate-500">Requested: {new Date(session.createdAt).toLocaleDateString()}</p>
+                    <div className="mt-4 flex flex-wrap gap-3">
+                      <button onClick={() => openModal(session)} className="px-5 py-2 bg-gradient-to-r from-indigo-500 to-violet-600 text-white rounded-lg">Schedule Session</button>
+                      <button onClick={() => rejectRequest(session)} className="px-5 py-2 bg-red-500 text-white rounded-lg">Reject</button>
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
 
@@ -252,32 +325,38 @@ export default function Sessions() {
             {mentorActive.length === 0 ? (
               <div className="text-slate-600">No upcoming sessions.</div>
             ) : (
-              mentorActive.map((session) => (
-                <div key={session._id} className="bg-white shadow rounded-xl p-5 mb-4">
-                  <h2 className="font-semibold text-xl">{session.learner?.name}</h2>
-                  <p>{session.skillTopic?.skillName}</p>
-                  <p className="text-sm text-slate-500">Status: {session.status}</p>
-                  <p className="text-sm text-slate-500">Scheduled: {session.scheduledAt ? new Date(session.scheduledAt).toLocaleString() : 'TBD'}</p>
-                  {session.status === 'scheduled' && session.meetingLink && (
-                    <a href={session.meetingLink} target="_blank" rel="noreferrer" className="inline-block mt-3 px-5 py-2 bg-blue-600 text-white rounded-lg">Join Session</a>
-                  )}
-                </div>
-              ))
+              mentorActive.map((session) => {
+                const participants = getSessionParticipants(session);
+                return (
+                  <div key={session._id} className="bg-white shadow rounded-xl p-5 mb-4">
+                    <h2 className="font-semibold text-xl">{participants.map((person) => person.name).join(', ') || session.learner?.name}</h2>
+                    <p>{session.skillTopic?.skillName}</p>
+                    <p className="text-sm text-slate-500">Status: {session.status}</p>
+                    <p className="text-sm text-slate-500">Scheduled: {session.scheduledAt ? new Date(session.scheduledAt).toLocaleString() : 'TBD'}</p>
+                    {session.status === 'scheduled' && session.meetingLink && (
+                      <a href={session.meetingLink} target="_blank" rel="noreferrer" className="inline-block mt-3 px-5 py-2 bg-blue-600 text-white rounded-lg">Join Session</a>
+                    )}
+                  </div>
+                );
+              })
             )}
           </div>
 
           <div>
             <h2 className="text-2xl font-semibold mb-3">Completed Sessions</h2>
-            {sessions.filter((session) => session.status === 'completed').length === 0 ? (
+            {sessions.filter((session) => isSessionCompleted(session)).length === 0 ? (
               <div className="text-slate-600">No completed sessions yet.</div>
             ) : (
-              sessions.filter((session) => session.status === 'completed').map((session) => (
-                <div key={session._id} className="bg-white shadow rounded-xl p-5 mb-4">
-                  <h2 className="font-semibold text-xl">{session.learner?.name}</h2>
-                  <p>{session.skillTopic?.skillName}</p>
-                  <p className="text-sm text-slate-500">Completed: {session.completedAt ? new Date(session.completedAt).toLocaleDateString() : 'Completed'}</p>
-                </div>
-              ))
+              sessions.filter((session) => isSessionCompleted(session)).map((session) => {
+                const participants = getSessionParticipants(session);
+                return (
+                  <div key={session._id} className="bg-white shadow rounded-xl p-5 mb-4">
+                    <h2 className="font-semibold text-xl">{participants.map((person) => person.name).join(', ') || session.learner?.name}</h2>
+                    <p>{session.skillTopic?.skillName}</p>
+                    <p className="text-sm text-slate-500">Completed: {session.completedAt ? new Date(session.completedAt).toLocaleDateString() : 'Completed'}</p>
+                  </div>
+                );
+              })
             )}
           </div>
         </div>
@@ -360,30 +439,41 @@ export default function Sessions() {
 
           <div>
             <h2 className="text-2xl font-semibold mb-3">Completed Sessions</h2>
-            {sessions.filter((session) => session.status === 'completed').length === 0 ? (
+            {sessions.filter((session) => isSessionCompleted(session)).length === 0 ? (
               <div className="text-slate-600">No completed sessions yet.</div>
             ) : (
               sessions
-                .filter((session) => session.status === 'completed')
+                .filter((session) => isSessionCompleted(session))
                 .map((session) => {
                   const review = sessionReviews[session._id];
+                  const completedLabel = session.completedAt ? new Date(session.completedAt).toLocaleString() : 'Completed';
                   return (
-                    <div key={session._id} className="bg-white shadow rounded-xl p-5 mb-4">
-                      <h2 className="font-semibold text-xl">{session.mentor?.name}</h2>
-                      <p>{session.skillTopic?.skillName}</p>
-                      <p className="text-sm text-slate-600">Completed: {session.completedAt ? new Date(session.completedAt).toLocaleString() : 'Completed'}</p>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <button
-                          onClick={() => openReviewModal(session)}
-                          className="px-5 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
-                        >
-                          {review ? 'Edit Review' : 'Leave Review'}
-                        </button>
-                        {review && (
-                          <span className="inline-flex items-center rounded-full bg-green-100 px-3 py-1 text-sm text-green-700">
-                            Reviewed
-                          </span>
-                        )}
+                    <div key={session._id} className="bg-white shadow rounded-2xl border border-slate-200 p-5 mb-4 transition hover:shadow-md">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
+                            <h2 className="font-semibold text-xl text-slate-800">{session.mentor?.name}</h2>
+                            <span className="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
+                              Completed
+                            </span>
+                          </div>
+                          <p className="text-slate-600">{session.skillTopic?.skillName}</p>
+                          <p className="text-sm text-slate-500 mt-1">Completed: {completedLabel}</p>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            onClick={() => openReviewModal(session)}
+                            className="px-5 py-2.5 rounded-xl bg-indigo-600 text-white font-medium shadow-sm hover:bg-indigo-700 transition"
+                          >
+                            {review ? 'Edit Review' : 'Leave Review'}
+                          </button>
+                          {review && (
+                            <span className="inline-flex items-center rounded-full bg-green-100 px-3 py-1.5 text-sm font-medium text-green-700">
+                              Reviewed
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                   );
@@ -431,6 +521,13 @@ export default function Sessions() {
             <input type="date" value={form.date} min={new Date().toISOString().split('T')[0]} className="border p-2 w-full mb-3" onChange={(e) => setForm({ ...form, date: e.target.value })} />
 
             <input type="time" value={form.time} className="border p-2 w-full mb-3" onChange={(e) => setForm({ ...form, time: e.target.value })} />
+
+            <label className="block text-sm font-medium text-slate-700 mb-1">Duration (minutes)</label>
+            <select value={form.duration} onChange={(e) => setForm({ ...form, duration: Number(e.target.value) })} className="border p-2 w-full mb-3">
+              {[15, 30, 45, 60, 90, 120, 180, 240].map((option) => (
+                <option key={option} value={option}>{option} minutes</option>
+              ))}
+            </select>
 
             <input type="text" placeholder="Meeting Link" value={form.meetingLink} className="border p-2 w-full mb-3" onChange={(e) => setForm({ ...form, meetingLink: e.target.value })} />
 

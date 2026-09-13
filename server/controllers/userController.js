@@ -19,13 +19,13 @@ exports.getMentors = async (req, res) => {
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, parseInt(req.query.limit) || 20); // Max 100, default 20
     const skip = (page - 1) * limit;
-    
+
     // Get total count
     const total = await User.countDocuments({
       _id: { $ne: currentUserId },
       skills: { $exists: true, $ne: [] }
     });
-    
+
     // Get users who have at least one skill with type "teach", excluding current user
     const mentors = await User.find({
       _id: { $ne: currentUserId },
@@ -33,8 +33,8 @@ exports.getMentors = async (req, res) => {
     })
       .select("-password")
       .limit(limit)
-.skip(skip)
-    
+      .skip(skip)
+
     res.json({
       mentors,
       pagination: {
@@ -65,12 +65,12 @@ exports.getUserById = async (req, res) => {
 // Update profile (skills + availability + basic info + photo)
 exports.updateProfile = async (req, res) => {
   try {
-    const { 
-      name, 
-      bio, 
-      skills, 
-      skillsToLearn, 
-      availability, 
+    const {
+      name,
+      bio,
+      skills,
+      skillsToLearn,
+      availability,
       photo,
       // Learner fields
       learningGoals,
@@ -85,7 +85,7 @@ exports.updateProfile = async (req, res) => {
 
     // Build update object
     const updateData = {};
-    
+
     // Handle basic info updates (for both roles)
     if (name !== undefined) updateData.name = name;
     if (bio !== undefined) updateData.bio = bio;
@@ -152,7 +152,7 @@ exports.updateProfile = async (req, res) => {
         return res.status(400).json({ msg: "Certifications must be an array" });
       }
       // Handle both string arrays and object arrays from client
-      const certStrings = certifications.map(cert => 
+      const certStrings = certifications.map(cert =>
         typeof cert === 'string' ? cert : (cert.name || 'Unnamed certification')
       );
       updateData.certifications = certStrings;
@@ -222,16 +222,16 @@ exports.getAllUsers = async (req, res) => {
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(50, parseInt(req.query.limit) || 20); // Max 50, default 20
     const skip = (page - 1) * limit;
-    
+
     // Get total count (async)
     const total = await User.countDocuments({ _id: { $ne: currentUserId } });
-    
+
     const users = await User.find({ _id: { $ne: currentUserId } })
       .select("name isOnline")
       .sort({ name: 1 })
       .limit(limit)
       .skip(skip)
-    
+
     res.json({
       users,
       pagination: {
@@ -256,12 +256,12 @@ exports.searchUsers = async (req, res) => {
     const skip = (page - 1) * limit;
 
     let filter = { _id: { $ne: currentUserId } };
-    
+
     // Filter by role if specified
     if (role) {
       filter.role = role;
     }
-    
+
     // Search by name or bio
     if (query) {
       filter.$or = [
@@ -269,17 +269,17 @@ exports.searchUsers = async (req, res) => {
         { bio: { $regex: query, $options: 'i' } }
       ];
     }
-    
+
     // Get total count
     const total = await User.countDocuments(filter);
-    
+
     const users = await User.find(filter)
       .populate('skills')
       .select("-password")
       .sort({ rating: -1 })
       .limit(limit)
-.skip(skip)
-    
+      .skip(skip)
+
     res.json({
       users,
       pagination: {
@@ -298,7 +298,7 @@ exports.searchUsers = async (req, res) => {
 exports.getLearningHistory = async (req, res) => {
   try {
     const userId = req.user.id;
-    
+
     const sessions = await Session.find({
       learner: userId,
       status: "completed"
@@ -306,12 +306,12 @@ exports.getLearningHistory = async (req, res) => {
       .populate('mentor', 'name photo')
       .populate('skillTopic')
       .sort({ completedAt: -1 });
-    
+
     const stats = {
       totalSessions: sessions.length,
       skillsLearned: [...new Set(sessions.map(s => s.skillTopic?.skillName).filter(Boolean))]
     };
-    
+
     res.json({ sessions, stats });
   } catch (err) {
     res.status(500).json({ msg: err.message });
@@ -322,8 +322,11 @@ exports.getLearningHistory = async (req, res) => {
 exports.getLearnerDashboard = async (req, res) => {
   try {
     const userId = req.user.id;
-    const sessions = await Session.find({ learner: userId })
+    const sessions = await Session.find({
+      $or: [{ learner: userId }, { learners: userId }]
+    })
       .populate('mentor', 'name photo')
+      .populate('learners', 'name photo email')
       .populate('skillTopic', 'skillName')
       .sort({ createdAt: -1 });
 
@@ -347,22 +350,27 @@ exports.getLearnerDashboard = async (req, res) => {
 exports.getMentorSessions = async (req, res) => {
   try {
     const userId = req.user.id;
-    
+
     const sessions = await Session.find({
       mentor: userId
     })
       .populate('learner', 'name photo')
+      .populate('learners', 'name photo email')
       .populate('skillTopic')
       .sort({ createdAt: -1 });
-    
+
     const completed = sessions.filter((s) => s.status === 'completed');
+    const studentIds = new Set(completed.flatMap((session) => [
+      session.learner?._id?.toString(),
+      ...(Array.isArray(session.learners) ? session.learners.map((learner) => learner?._id?.toString()) : [])
+    ].filter(Boolean)));
     const stats = {
       totalSessions: sessions.length,
       completedSessions: completed.length,
       upcomingSessions: sessions.filter((s) => ['scheduled', 'in-progress'].includes(s.status)).length,
-      studentsHelped: new Set(completed.map(s => s.learner?._id?.toString()).filter(Boolean)).size
+      studentsHelped: studentIds.size
     };
-    
+
     res.json({ sessions, stats });
   } catch (err) {
     res.status(500).json({ msg: err.message });
@@ -375,22 +383,22 @@ exports.addReview = async (req, res) => {
     const { userId } = req.params;
     const { rating, comment } = req.body;
     const fromUserId = req.user.id;
-    
+
     // Validate rating
     if (rating < 1 || rating > 5) {
       return res.status(400).json({ msg: "Rating must be between 1 and 5" });
     }
-    
+
     // Check if user already reviewed this person
     const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({ msg: "User not found" });
     }
-    
+
     const existingReview = user.reviewsReceived.find(
       r => r.fromUser.toString() === fromUserId
     );
-    
+
     if (existingReview) {
       // Update existing review
       existingReview.rating = rating;
@@ -404,15 +412,15 @@ exports.addReview = async (req, res) => {
         createdAt: new Date()
       });
     }
-    
+
     // Recalculate average rating
     if (user.reviewsReceived.length > 0) {
       const avgRating = user.reviewsReceived.reduce((sum, r) => sum + r.rating, 0) / user.reviewsReceived.length;
       user.rating = Math.round(avgRating * 10) / 10;
     }
-    
+
     await user.save();
-    
+
     res.json({ message: "Review added successfully", user });
   } catch (err) {
     res.status(500).json({ msg: err.message });
@@ -423,20 +431,20 @@ exports.addReview = async (req, res) => {
 exports.getUserReviews = async (req, res) => {
   try {
     let { userId } = req.params;
-    
+
     // Handle "me" parameter to use authenticated user's ID
     if (userId === "me") {
       userId = req.user.id;
     }
-    
+
     const user = await User.findById(userId)
       .select('rating reviewsReceived')
       .populate('reviewsReceived.fromUser', 'name photo');
-    
+
     if (!user) {
       return res.status(404).json({ msg: "User not found" });
     }
-    
+
     res.json({
       averageRating: user.rating,
       reviewCount: user.reviewsReceived.length,
@@ -451,13 +459,13 @@ exports.getUserReviews = async (req, res) => {
 exports.getAvailability = async (req, res) => {
   try {
     const { userId } = req.params;
-    
+
     const user = await User.findById(userId).select('availability');
-    
+
     if (!user) {
       return res.status(404).json({ msg: "User not found" });
     }
-    
+
     res.json({ availability: user.availability });
   } catch (err) {
     res.status(500).json({ msg: err.message });
@@ -468,17 +476,17 @@ exports.getAvailability = async (req, res) => {
 exports.updateAvailability = async (req, res) => {
   try {
     const { availability } = req.body;
-    
+
     if (!Array.isArray(availability)) {
       return res.status(400).json({ msg: "Availability must be an array" });
     }
-    
+
     const user = await User.findByIdAndUpdate(
       req.user.id,
       { availability },
       { new: true }
     ).select("-password");
-    
+
     res.json({ message: "Availability updated", availability: user.availability });
   } catch (err) {
     res.status(500).json({ msg: err.message });
@@ -489,19 +497,24 @@ exports.updateAvailability = async (req, res) => {
 exports.getLearners = async (req, res) => {
   try {
     const userId = req.user.id;
-    
+
     const Session = require("../models/Session");
-    
-    // Get unique learners from mentor's sessions
-    const sessions = await Session.find({ mentor: userId })
-      .select('learner')
-      .distinct('learner');
-    
-    // Fetch learner details
-    const learners = await User.find({ _id: { $in: sessions } })
+
+    const sessionLearners = await Session.find({ mentor: userId })
+      .select('learner learners')
+      .lean();
+
+    const learnerIds = [...new Set(
+      sessionLearners.flatMap((session) => [
+        session.learner,
+        ...(Array.isArray(session.learners) ? session.learners : [])
+      ]).filter(Boolean).map((id) => id.toString())
+    )];
+
+    const learners = await User.find({ _id: { $in: learnerIds } })
       .select('name photo email learningGoals bio')
       .limit(50);
-    
+
     res.json(learners);
   } catch (err) {
     res.status(500).json({ msg: err.message });

@@ -14,6 +14,12 @@ export default function MyRequests() {
     if (authLoading) return;
     if (!user) return;
     fetchRequests();
+
+    const liveRefresh = setInterval(() => {
+      fetchRequests();
+    }, 30000);
+
+    return () => clearInterval(liveRefresh);
   }, [authLoading, user]);
 
   async function fetchRequests() {

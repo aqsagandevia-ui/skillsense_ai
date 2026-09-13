@@ -5,7 +5,7 @@ const Sentiment = require('sentiment');
 const sentiment = new Sentiment();
 
 const stopwords = new Set([
-  'the','and','for','with','that','this','was','very','were','had','but','not','have','has','been','they','them','their','its','are','is','on','in','at','to','of','a','an','it','as','so','if','be','by','or','from','your','you','we','my','me','our','us','can','will','would','could','should','just','too','also','session','mentor','learner','review','feedback','course','learn','learning'
+  'the', 'and', 'for', 'with', 'that', 'this', 'was', 'very', 'were', 'had', 'but', 'not', 'have', 'has', 'been', 'they', 'them', 'their', 'its', 'are', 'is', 'on', 'in', 'at', 'to', 'of', 'a', 'an', 'it', 'as', 'so', 'if', 'be', 'by', 'or', 'from', 'your', 'you', 'we', 'my', 'me', 'our', 'us', 'can', 'will', 'would', 'could', 'should', 'just', 'too', 'also', 'session', 'mentor', 'learner', 'review', 'feedback', 'course', 'learn', 'learning'
 ]);
 
 const buildReviewProjection = () => ({
@@ -161,17 +161,25 @@ exports.createReview = async (req, res) => {
       return res.status(404).json({ msg: 'Session not found' });
     }
 
-    if (session.learner.toString() !== learnerId) {
-      return res.status(403).json({ msg: 'Only the learner who attended the session can submit a review' });
+    const learnerIds = [...new Set([
+      session.learner,
+      ...(Array.isArray(session.learners) ? session.learners : [])
+    ].filter(Boolean).map((id) => id.toString()))];
+
+    if (!learnerIds.includes(learnerId)) {
+      return res.status(403).json({ msg: 'Only a learner who attended the session can submit a review' });
     }
 
-    if (session.status !== 'completed') {
-      return res.status(400).json({ msg: 'Reviews can only be submitted for completed sessions' });
+    const now = new Date();
+    const endTime = session.endTime ? new Date(session.endTime) : null;
+    const isClosedEarly = Boolean(session.closedAt);
+    if ((session.status !== 'completed' && !isClosedEarly) || !endTime || (now < endTime && !isClosedEarly)) {
+      return res.status(400).json({ success: false, msg: 'Reviews can only be submitted after the session has ended or been closed by the mentor.' });
     }
 
-    const existing = await Review.findOne({ session: sessionId });
+    const existing = await Review.findOne({ session: sessionId, learner: learnerId });
     if (existing) {
-      return res.status(409).json({ msg: 'A review already exists for this session. Use edit if needed.' });
+      return res.status(409).json({ success: false, msg: 'You have already submitted a review for this session.' });
     }
 
     const { sentiment, sentimentScore, keywords } = analyzeReviewComment(comment);
@@ -251,6 +259,18 @@ exports.getSessionReview = async (req, res) => {
     }
 
     res.json({ review });
+  } catch (err) {
+    res.status(500).json({ msg: err.message });
+  }
+};
+
+exports.getReviewStatus = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const learnerId = req.user.id;
+
+    const existing = await Review.findOne({ session: sessionId, learner: learnerId });
+    res.json({ reviewed: Boolean(existing) });
   } catch (err) {
     res.status(500).json({ msg: err.message });
   }

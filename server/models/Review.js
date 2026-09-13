@@ -48,4 +48,6 @@ const reviewSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+reviewSchema.index({ session: 1, learner: 1 }, { unique: true });
+
 module.exports = mongoose.model('Review', reviewSchema);

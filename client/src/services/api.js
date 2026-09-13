@@ -66,6 +66,7 @@ export const reviewAPI = {
   getMyReviews: () => api.get('/reviews/me'),
   getMentorReviews: (mentorId, rating) => api.get(`/reviews/mentor/${mentorId}`, { params: rating ? { rating } : {} }),
   getSessionReview: (sessionId) => api.get(`/reviews/session/${sessionId}`),
+  getReviewStatus: (sessionId) => api.get(`/reviews/session/${sessionId}/status`),
   editReview: (id, data) => api.put(`/reviews/${id}`, data),
   deleteReview: (id) => api.delete(`/reviews/${id}`),
   getMentorStats: (mentorId) => api.get(`/reviews/stats/${mentorId}`)
@@ -75,6 +76,20 @@ export const reviewAPI = {
 export const messageAPI = {
   getMessages: (userId) => api.get(`/messages/${userId}`),
   sendMessage: (data) => api.post('/messages', data)
+};
+
+export const groupAPI = {
+  getMyGroups: () => api.get('/groups'),
+  createGroup: (data) => api.post('/groups', data),
+  getGroupById: (groupId) => api.get(`/groups/${groupId}`),
+  getGroupMessages: (groupId, params = {}) => api.get(`/groups/${groupId}/messages`, { params }),
+  sendGroupMessage: (groupId, data) => api.post(`/groups/${groupId}/messages`, data),
+  updateGroup: (groupId, data) => api.patch(`/groups/${groupId}`, data),
+  deleteGroup: (groupId) => api.delete(`/groups/${groupId}`),
+  addMembers: (groupId, data) => api.post(`/groups/${groupId}/members`, data),
+  removeMember: (groupId, userId) => api.delete(`/groups/${groupId}/members/${userId}`),
+  changeAdminStatus: (groupId, userId, data) => api.patch(`/groups/${groupId}/members/${userId}/admin`, data),
+  leaveGroup: (groupId) => api.post(`/groups/${groupId}/leave`)
 };
 
 // Match APIs

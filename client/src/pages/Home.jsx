@@ -344,6 +344,7 @@
 
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useEffect, useState } from "react";
+import { useAuth } from "../context/AuthContext";
 
 const features = [
   {
@@ -375,6 +376,7 @@ const skillGradients = [
 export default function Home() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = useAuth();
   const [popularSkills, setPopularSkills] = useState([]);
   const [stats, setStats] = useState({
     totalSkills: 0,
@@ -464,6 +466,20 @@ export default function Home() {
     }
   }, [location]);
 
+  const handleRequestSwap = (skill) => {
+    if (!user) {
+      navigate("/login");
+      return;
+    }
+
+    navigate(`/skill/${encodeURIComponent(skill.title)}`, {
+      state: {
+        skill,
+        allMentors: skill.mentors || [skill]
+      }
+    });
+  };
+
   const statItems = [
     { label: "Skills Available", value: `${stats.totalSkills}+`, icon: "📚" },
     { label: "Active Users", value: `${stats.activeUsers}+`, icon: "👥" },
@@ -474,34 +490,34 @@ export default function Home() {
   return (
     <div className="pt-16">
       {/* HERO SECTION */}
-      <section className="relative overflow-hidden bg-gradient-to-br from-indigo-50 via-white to-emerald-50">
+      <section className="relative overflow-hidden bg-gradient-to-br from-slate-50 via-indigo-50 to-violet-50">
         <div className="absolute inset-0 overflow-hidden">
-          <div className="absolute -top-40 -right-40 w-80 h-80 bg-primary/10 rounded-full blur-3xl"></div>
-          <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-secondary/10 rounded-full blur-3xl"></div>
+          <div className="absolute -top-40 -right-40 w-80 h-80 bg-indigo-500/10 rounded-full blur-3xl"></div>
+          <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-violet-500/10 rounded-full blur-3xl"></div>
         </div>
 
         <div className="relative max-w-7xl mx-auto px-6 py-20 sm:py-28">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
             <div className="animate-fade-in">
-              <div className="inline-flex items-center gap-2 px-4 py-2 bg-primary/10 rounded-full text-primary font-medium text-sm mb-6">
-                <span className="w-2 h-2 bg-primary rounded-full animate-pulse"></span>
+              <div className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-100 text-indigo-700 rounded-full font-medium text-sm mb-6 shadow-sm">
+                <span className="w-2 h-2 bg-indigo-600 rounded-full animate-pulse"></span>
                 Start Learning Today
               </div>
 
-              <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-tight text-gray-900">
-                Learn by <span className="bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">Sharing</span>
+              <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-tight text-slate-900">
+                Learn by <span className="bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-transparent">Sharing</span>
                 <br />
-                Grow by <span className="bg-gradient-to-r from-secondary to-primary bg-clip-text text-transparent">Swapping</span>
+                Grow by <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">Swapping</span>
               </h1>
 
-              <p className="mt-6 text-gray-600 text-lg max-w-xl">
+              <p className="mt-6 text-slate-600 text-lg max-w-xl">
                 Exchange skills with real people worldwide. No money. Just pure learning through collaboration and knowledge sharing.
               </p>
 
               <div className="mt-8 flex flex-wrap gap-4">
                 <Link
                   to="/register"
-                  className="inline-flex items-center gap-2 bg-gradient-to-r from-primary to-indigo-600 text-white px-8 py-4 rounded-xl font-semibold shadow-lg shadow-primary/30 hover:shadow-xl hover:shadow-primary/40 hover:-translate-y-1 transition-all duration-300"
+                  className="inline-flex items-center gap-2 bg-gradient-to-r from-indigo-600 to-violet-600 text-white px-8 py-4 rounded-2xl font-semibold shadow-lg shadow-indigo-500/30 hover:shadow-xl hover:shadow-indigo-500/40 hover:-translate-y-1 transition-all duration-300"
                 >
                   Start Swapping
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -510,7 +526,7 @@ export default function Home() {
                 </Link>
                 <Link
                   to="/browse"
-                  className="inline-flex items-center gap-2 bg-white text-gray-700 px-8 py-4 rounded-xl font-semibold border-2 border-gray-100 hover:border-primary/30 hover:shadow-lg hover:-translate-y-1 transition-all duration-300"
+                  className="inline-flex items-center gap-2 bg-white text-slate-700 px-8 py-4 rounded-2xl font-semibold border border-slate-200 hover:border-indigo-200 hover:shadow-lg hover:-translate-y-1 transition-all duration-300"
                 >
                   Explore Skills
                 </Link>
@@ -572,10 +588,10 @@ export default function Home() {
       <section className="py-20 bg-white">
         <div className="max-w-7xl mx-auto px-6">
           <div className="text-center mb-16">
-            <h2 className="text-3xl sm:text-4xl font-bold text-gray-900">
+            <h2 className="text-3xl sm:text-4xl font-bold text-slate-900">
               Why Choose SkillSense AI?
             </h2>
-            <p className="mt-4 text-gray-600 max-w-2xl mx-auto">
+            <p className="mt-4 text-slate-600 max-w-2xl mx-auto">
               We make skill exchange simple, fun, and rewarding for everyone involved.
             </p>
           </div>
@@ -584,17 +600,17 @@ export default function Home() {
             {features.map((feature, index) => (
               <div
                 key={index}
-                className="group p-8 rounded-3xl bg-gray-50 hover:bg-gradient-to-br hover:from-indigo-50 hover:to-emerald-50 transition-all duration-300 card-hover"
+                className="group p-8 rounded-3xl border border-slate-200 bg-slate-50 hover:border-indigo-200 hover:bg-gradient-to-br hover:from-indigo-50 hover:to-violet-50 transition-all duration-300 shadow-sm hover:shadow-lg"
               >
-                <div className="w-14 h-14 bg-gradient-to-br from-primary to-secondary rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
+                <div className="w-14 h-14 bg-gradient-to-br from-indigo-600 to-violet-600 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300 shadow-md">
                   <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={feature.icon} />
                   </svg>
                 </div>
-                <h3 className="text-xl font-bold text-gray-900 mb-3">
+                <h3 className="text-xl font-bold text-slate-900 mb-3">
                   {feature.title}
                 </h3>
-                <p className="text-gray-600">
+                <p className="text-slate-600">
                   {feature.description}
                 </p>
               </div>
@@ -603,11 +619,11 @@ export default function Home() {
         </div>
       </section>
 
-      <div className="bg-gradient-to-r from-primary to-indigo-600 py-16">
+      <div className="bg-gradient-to-r from-indigo-600 via-violet-600 to-purple-700 py-16">
         <div className="max-w-7xl mx-auto px-6">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
             {statItems.map((item, i) => (
-              <div key={i} className="text-center">
+              <div key={i} className="rounded-2xl border border-white/10 bg-white/5 p-5 text-center backdrop-blur-sm">
                 <div className="text-4xl mb-2">{item.icon}</div>
                 <h3 className="text-4xl font-bold text-white">{item.value}</h3>
                 <p className="text-white/80">{item.label}</p>
@@ -620,12 +636,12 @@ export default function Home() {
       <div id="popular-skills" className="max-w-7xl mx-auto px-6 py-20">
         <div className="flex justify-between items-end mb-12">
           <div>
-            <h2 className="text-3xl font-bold text-gray-900">Popular Skills</h2>
-            <p className="text-gray-500 mt-2">Discover trending skill exchanges</p>
+            <h2 className="text-3xl font-bold text-slate-900">Popular Skills</h2>
+            <p className="text-slate-500 mt-2">Discover trending skill exchanges</p>
           </div>
           <Link
             to="/browse"
-            className="hidden sm:flex items-center gap-2 text-primary font-semibold hover:gap-3 transition-all"
+            className="hidden sm:flex items-center gap-2 text-indigo-600 font-semibold hover:gap-3 transition-all"
           >
             View All
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -643,7 +659,7 @@ export default function Home() {
             {popularSkills.map((skill, i) => (
               <div
                 key={`${skill.title}-${i}`}
-                className="group bg-white rounded-3xl overflow-hidden shadow-md hover:shadow-2xl transition-all duration-300 card-hover"
+                className="group bg-white rounded-3xl overflow-hidden shadow-md hover:shadow-2xl transition-all duration-300 border border-slate-200 hover:border-indigo-200"
               >
                 <div className="relative h-48 overflow-hidden">
                   <div className={`absolute inset-0 bg-gradient-to-br ${skill.color} opacity-20 group-hover:opacity-30 transition-opacity`}></div>
@@ -652,24 +668,20 @@ export default function Home() {
                     alt={skill.title}
                     className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
                   />
-                  <div className="absolute top-4 right-4 bg-white/90 backdrop-blur-sm px-3 py-1 rounded-full text-sm font-medium text-gray-700">
+                  <div className="absolute top-4 right-4 bg-white/90 backdrop-blur-sm px-3 py-1 rounded-full text-sm font-medium text-slate-700">
                     {skill.users} users
                   </div>
                 </div>
                 <div className="p-5">
-                  <h3 className="font-bold text-lg text-gray-900 group-hover:text-primary transition-colors">
+                  <h3 className="font-bold text-lg text-slate-900 group-hover:text-indigo-600 transition-colors">
                     {skill.title}
                   </h3>
-                  <p className="text-sm text-gray-500 mt-1 flex items-center gap-1">
-                    <span className="text-secondary">↔</span> {skill.wants}
+                  <p className="text-sm text-slate-500 mt-1 flex items-center gap-1">
+                    <span className="text-violet-600">↔</span> {skill.wants}
                   </p>
                   <button
-                    onClick={() =>
-                      navigate(`/skill/${encodeURIComponent(skill.title)}`, {
-                        state: { skill }
-                      })
-                    }
-                    className="mt-4 w-full bg-gradient-to-r from-primary to-indigo-600 text-white py-2.5 rounded-xl"
+                    onClick={() => handleRequestSwap(skill)}
+                    className="mt-4 w-full bg-gradient-to-r from-indigo-600 to-violet-600 text-white py-2.5 rounded-xl shadow-sm hover:shadow-md transition-all"
                   >
                     Request Swap
                   </button>

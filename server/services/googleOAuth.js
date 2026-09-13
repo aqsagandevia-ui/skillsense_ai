@@ -60,6 +60,7 @@ const createCalendarEvent = async ({
     startTime,
     endTime,
     attendeeEmail,
+    attendeeEmails,
     existingEventId,
 }) => {
     if (
@@ -84,6 +85,12 @@ const createCalendarEvent = async ({
         auth,
     });
 
+    const normalizedAttendeeEmails = Array.isArray(attendeeEmails)
+        ? attendeeEmails.filter(Boolean)
+        : attendeeEmail
+            ? [attendeeEmail]
+            : [];
+
     const resource = {
         summary,
         description,
@@ -95,9 +102,7 @@ const createCalendarEvent = async ({
             dateTime: endTime.toISOString(),
             timeZone: "UTC",
         },
-        attendees: attendeeEmail
-            ? [{ email: attendeeEmail }]
-            : [],
+        attendees: [...new Set(normalizedAttendeeEmails)].map((email) => ({ email })),
         conferenceData: {
             createRequest: {
                 requestId: `skillswap-${Date.now()}-${String(

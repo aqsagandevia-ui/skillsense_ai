@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { reviewAPI } from "../services/api";
+import ReviewModal from "../components/ui/ReviewModal";
 
 /* --------------------------------------------------
    SIMPLE UI COMPONENTS
@@ -31,9 +33,8 @@ const StatCard = ({ title, value, color = "blue" }) => {
 
   return (
     <div
-      className={`bg-white rounded-xl shadow p-5 border-l-4 ${
-        colors[color] || colors.blue
-      }`}
+      className={`bg-white rounded-xl shadow p-5 border-l-4 ${colors[color] || colors.blue
+        }`}
     >
       <div className="text-3xl font-bold">{value}</div>
       <div className="text-sm text-slate-500 mt-1">{title}</div>
@@ -64,6 +65,11 @@ export default function LearnerDashboard() {
   const [filteredMentors, setFilteredMentors] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [history, setHistory] = useState([]);
+  const [reviewModalOpen, setReviewModalOpen] = useState(false);
+  const [reviewSession, setReviewSession] = useState(null);
+  const [reviewForm, setReviewForm] = useState({ rating: 5, comment: "" });
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [sessionReviews, setSessionReviews] = useState({});
 
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -131,6 +137,69 @@ export default function LearnerDashboard() {
     }
   };
 
+  const isSessionCompleted = (session) => {
+    if (!session) return false;
+    if (session.status === "completed") return true;
+
+    const start = session?.startTime ? new Date(session.startTime) : session?.scheduledAt ? new Date(session.scheduledAt) : null;
+    const end = session?.endTime ? new Date(session.endTime) : null;
+
+    return !!start && !!end && new Date() >= end;
+  };
+
+  const openReviewModal = async (session) => {
+    setReviewSession(session);
+    setReviewLoading(true);
+
+    try {
+      const response = await reviewAPI.getSessionReview(session._id);
+      const review = response.data.review;
+      setSessionReviews((prev) => ({ ...prev, [session._id]: review }));
+      setReviewForm({ rating: review.rating, comment: review.comment || "" });
+    } catch (err) {
+      if (err.response?.status === 404) {
+        setReviewForm({ rating: 5, comment: "" });
+      } else {
+        console.error("Unable to load review details", err);
+      }
+    } finally {
+      setReviewLoading(false);
+      setReviewModalOpen(true);
+    }
+  };
+
+  const closeReviewModal = () => {
+    setReviewModalOpen(false);
+    setReviewSession(null);
+    setReviewForm({ rating: 5, comment: "" });
+  };
+
+  const handleReviewSubmit = async ({ rating, comment }) => {
+    if (!reviewSession) return;
+    setReviewLoading(true);
+
+    try {
+      const payload = { sessionId: reviewSession._id, rating, comment };
+      const existing = sessionReviews[reviewSession._id];
+
+      if (existing) {
+        await reviewAPI.editReview(existing._id, payload);
+      } else {
+        await reviewAPI.createReview(payload);
+      }
+
+      const updated = await reviewAPI.getSessionReview(reviewSession._id);
+      setSessionReviews((prev) => ({ ...prev, [reviewSession._id]: updated.data.review }));
+      closeReviewModal();
+      alert("Review saved successfully");
+    } catch (err) {
+      console.error("Review submit error", err);
+      alert(err.response?.data?.msg || err.message || "Failed to save review");
+    } finally {
+      setReviewLoading(false);
+    }
+  };
+
   /* --------------------------------------------------
      FILTER MENTORS
   --------------------------------------------------- */
@@ -164,6 +233,8 @@ export default function LearnerDashboard() {
       </div>
     );
   }
+
+  const completedSessions = sessions.filter((session) => isSessionCompleted(session));
 
   /* --------------------------------------------------
      MAIN UI
@@ -202,11 +273,10 @@ export default function LearnerDashboard() {
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`px-5 py-2 rounded-lg font-medium transition ${
-                activeTab === tab
-                  ? "bg-blue-600 text-white"
-                  : "bg-white text-slate-700 border"
-              }`}
+              className={`px-5 py-2 rounded-lg font-medium transition ${activeTab === tab
+                ? "bg-blue-600 text-white"
+                : "bg-white text-slate-700 border"
+                }`}
             >
               {tab.toUpperCase()}
             </button>
@@ -239,6 +309,36 @@ export default function LearnerDashboard() {
                 color="pink"
               />
             </div>
+
+            {completedSessions.length > 0 && (
+              <div className="mb-8">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xl font-semibold text-slate-900">Completed Sessions</h3>
+                </div>
+
+                <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {completedSessions.slice(0, 3).map((session) => {
+                    const review = sessionReviews[session._id];
+                    return (
+                      <div key={session._id} className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+                        <h4 className="font-semibold text-slate-900">{session.mentor?.name || "Mentor"}</h4>
+                        <p className="text-sm text-slate-500 mt-1">{session.skillTopic?.skillName || "Session"}</p>
+                        <p className="text-xs text-slate-400 mt-2">
+                          {session.completedAt ? new Date(session.completedAt).toLocaleString() : "Completed"}
+                        </p>
+
+                        <button
+                          onClick={() => openReviewModal(session)}
+                          className="mt-4 w-full rounded-xl bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition"
+                        >
+                          {review ? "Edit Review" : "Leave Review"}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             <div className="grid md:grid-cols-3 gap-6">
               <Card>
@@ -353,7 +453,7 @@ export default function LearnerDashboard() {
                       <p className="text-xs uppercase tracking-wide text-slate-400 mt-1">{session.status}</p>
                     </div>
 
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 flex-wrap">
                       {session.status === "scheduled" && (
                         <Button className="bg-green-600 text-white hover:bg-green-700" onClick={() => fetch(`/api/session/start`, { method: 'PUT', headers: { Authorization: `Bearer ${localStorage.getItem('token')}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: session._id }) })}>
                           Start
@@ -362,6 +462,11 @@ export default function LearnerDashboard() {
                       {session.status === "in-progress" && (
                         <Button className="bg-purple-600 text-white hover:bg-purple-700" onClick={() => fetch(`/api/session/complete`, { method: 'PUT', headers: { Authorization: `Bearer ${localStorage.getItem('token')}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: session._id }) })}>
                           Complete
+                        </Button>
+                      )}
+                      {isSessionCompleted(session) && (
+                        <Button className="bg-indigo-600 text-white hover:bg-indigo-700" onClick={() => openReviewModal(session)}>
+                          {sessionReviews[session._id] ? "Edit Review" : "Leave Review"}
                         </Button>
                       )}
                       <Link to={`/chat/${session.mentor?._id}`} className="px-4 py-2 rounded-lg bg-slate-200 text-slate-700">
@@ -403,8 +508,8 @@ export default function LearnerDashboard() {
                       Completed:{" "}
                       {item.completedAt
                         ? new Date(
-                            item.completedAt
-                          ).toLocaleDateString()
+                          item.completedAt
+                        ).toLocaleDateString()
                         : "N/A"}
                     </p>
                   </div>
@@ -414,6 +519,18 @@ export default function LearnerDashboard() {
           </Card>
         )}
       </div>
+
+      {reviewModalOpen && reviewSession && (
+        <ReviewModal
+          open={reviewModalOpen}
+          title={sessionReviews[reviewSession._id] ? "Edit Review" : "Leave a Review"}
+          initialRating={reviewForm.rating}
+          initialComment={reviewForm.comment}
+          onClose={closeReviewModal}
+          onSubmit={handleReviewSubmit}
+          loading={reviewLoading}
+        />
+      )}
     </div>
   );
 }

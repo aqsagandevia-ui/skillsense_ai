@@ -1,20 +1,24 @@
+:root {
+  --auth-bg: linear-gradient(135deg, rgba(79, 70, 229, 0.12), rgba(59, 130, 246, 0.12));
+  --auth-card: rgba(255, 255, 255, 0.82);
+  --auth-border: rgba(148, 163, 184, 0.25);
+}
+
 body {
-  font-family: Arial, sans-serif;
-  margin:0;
-  padding:0;
-  background: linear-gradient(135deg, #6a11cb, #2575fc);
-  height: 100vh;
-  display: flex;
-  justify-content: center;
-  align-items: center;
+  font-family: 'Inter', system-ui, sans-serif;
+  margin: 0;
+  padding: 0;
+  background: var(--auth-bg);
 }
 
 .auth-container {
-  background: rgba(255,255,255,0.1);
+  background: var(--auth-card);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--auth-border);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.12);
+  border-radius: 24px;
   padding: 30px 40px;
-  border-radius: 15px;
-  box-shadow: 0 8px 25px rgba(0,0,0,0.3);
-  backdrop-filter: blur(10px);
 }
 
 .auth-form {
@@ -25,50 +29,60 @@ body {
 .auth-form h2 {
   text-align: center;
   margin-bottom: 20px;
-  color: #fff;
+  color: #0f172a;
+  font-size: 1.8rem;
+  font-weight: 700;
 }
 
 .auth-form input {
-  padding: 12px;
+  padding: 12px 14px;
   margin: 8px 0;
-  border-radius: 8px;
-  border: none;
+  border-radius: 12px;
+  border: 1px solid #dfe7f1;
+  background: white;
   outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.auth-form input:focus {
+  border-color: rgba(79, 70, 229, 0.8);
+  box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.12);
 }
 
 .auth-form button {
   margin-top: 15px;
-  padding: 12px;
-  border-radius: 8px;
+  padding: 12px 16px;
+  border-radius: 12px;
   border: none;
-  background: #fff;
-  color: #2575fc;
-  font-weight: bold;
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+  color: #fff;
+  font-weight: 700;
   cursor: pointer;
-  transition: 0.3s;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: 0 10px 24px rgba(79, 70, 229, 0.24);
 }
 
 .auth-form button:hover {
-  background: #2575fc;
-  color: #fff;
+  transform: translateY(-1px);
+  box-shadow: 0 14px 28px rgba(79, 70, 229, 0.3);
 }
 
 .error {
-  color: #ff6b6b;
+  color: #dc2626;
   font-size: 0.85rem;
-  margin: -5px 0 5px 0;
+  margin: -4px 0 6px 0;
 }
 
 .redirect-text {
   text-align: center;
   margin-top: 10px;
-  color: #fff;
+  color: #475569;
   font-size: 0.9rem;
 }
 
 .redirect-text span {
-  color: #fff;
-  font-weight: bold;
+  color: #4f46e5;
+  font-weight: 700;
   cursor: pointer;
   text-decoration: underline;
 }

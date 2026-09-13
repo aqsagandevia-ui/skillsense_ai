@@ -44,12 +44,31 @@ export default function SkillDetails() {
   const [sending, setSending] = useState(false);
 
   const openRequestModal = (m) => {
+    if (!currentUser) {
+      navigate('/login');
+      return;
+    }
     setModalMentor(m);
     setShowModal(true);
   };
 
+  const handleSelectMentor = (mentor) => {
+    if (!currentUser) {
+      navigate('/login');
+      return;
+    }
+
+    navigate(`/mentor/${mentor.id}`, {
+      state: { mentor: mentor.user, skill: skillData },
+    });
+  };
+
   const sendRequest = async () => {
-    if (!currentUser || currentUser.role !== 'learner') {
+    if (!currentUser) {
+      navigate('/login');
+      return;
+    }
+    if (currentUser.role !== 'learner') {
       toast.error('Only learners can request sessions');
       return;
     }
@@ -178,11 +197,7 @@ export default function SkillDetails() {
                 <p className="text-sm text-gray-500 text-center">{mentor.exp}</p>
 
                 <button
-                  onClick={() =>
-                    navigate(`/mentor/${mentor.id}`, {
-                      state: { mentor: mentor.user, skill: skillData },
-                    })
-                  }
+                  onClick={() => handleSelectMentor(mentor)}
                   className="mt-5 w-full bg-gradient-to-r from-indigo-500 to-purple-600 text-white py-2.5 rounded-xl font-semibold hover:shadow-lg transition-all"
                 >
                   Select Mentor

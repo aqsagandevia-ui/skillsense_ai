@@ -7,6 +7,7 @@ import StatCard from '../components/ui/StatCard';
 import Modal from '../components/ui/Modal';
 import Button from '../components/ui/Button';
 import Avatar from '../components/ui/Avatar';
+import MentorAvailabilityCalendar from '../components/MentorAvailabilityCalendar';
 
 export default function MentorDashboard() {
   const { user, loading: authLoading, logout } = useAuth();
@@ -32,8 +33,10 @@ export default function MentorDashboard() {
   // Scheduling modal
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [scheduleFor, setScheduleFor] = useState(null);
+  const [selectedLearners, setSelectedLearners] = useState([]);
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
+  const [duration, setDuration] = useState(60);
   const [calendarConnected, setCalendarConnected] = useState(false);
   const [calendarLoading, setCalendarLoading] = useState(false);
   const today = new Date().toISOString().split('T')[0];
@@ -59,6 +62,12 @@ export default function MentorDashboard() {
     const calendarResult = new URLSearchParams(location.search).get('calendar');
     if (calendarResult === 'connected') setSuccess('Google Calendar connected successfully.');
     if (calendarResult === 'error') setError('Google Calendar connection was not completed.');
+
+    const liveRefresh = setInterval(() => {
+      fetchData();
+    }, 30000);
+
+    return () => clearInterval(liveRefresh);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, authLoading, location.search]);
 
@@ -176,6 +185,8 @@ export default function MentorDashboard() {
         throw new Error(data.msg || 'Failed to accept request');
       }
 
+      const initialParticipantIds = [request.learner?._id || request.learner || request.user?._id].filter(Boolean);
+      setSelectedLearners(initialParticipantIds);
       setSuccess('Request accepted. You may now schedule the session.');
       setScheduleFor(data.session);
       setShowScheduleModal(true);
@@ -212,10 +223,15 @@ export default function MentorDashboard() {
 
   const schedule = async () => {
     if (!scheduleFor || !date || !time) return setError('Pick date and time');
+    const durationMinutes = Number(duration);
+    if (!Number.isFinite(durationMinutes) || durationMinutes < 15 || durationMinutes > 240) {
+      return setError('Select a valid session duration between 15 and 240 minutes');
+    }
+    if (!selectedLearners.length) return setError('Select at least one learner for this session');
     if (!calendarConnected) return setError('Connect Google Calendar before scheduling a session');
     try {
       const token = localStorage.getItem('token');
-      const body = { date, time, note: '' };
+      const body = { date, time, duration: durationMinutes, note: '', learners: selectedLearners };
       const res = await fetch(`/api/session/${scheduleFor._id}/schedule`, {
         method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body)
       });
@@ -225,13 +241,55 @@ export default function MentorDashboard() {
       }
       setShowScheduleModal(false);
       setScheduleFor(null);
-      setDate(''); setTime('');
+      setSelectedLearners([]);
+      setDate(''); setTime(''); setDuration(60);
       setSuccess('Session scheduled successfully.');
       fetchData();
     } catch (e) {
       console.error(e);
       setError(e.message || 'Failed to schedule');
     }
+  };
+
+  const getSessionParticipants = (session) => {
+    const participants = [];
+    const seen = new Set();
+
+    const addParticipant = (person) => {
+      if (!person) return;
+      const id = person._id || person.id;
+      if (!id || seen.has(String(id))) return;
+      seen.add(String(id));
+      participants.push(person);
+    };
+
+    addParticipant(session?.learner);
+    if (Array.isArray(session?.learners)) {
+      session.learners.forEach(addParticipant);
+    }
+
+    return participants;
+  };
+
+  const getSessionWindow = (session) => {
+    const start = session?.startTime ? new Date(session.startTime) : session?.scheduledAt ? new Date(session.scheduledAt) : null;
+    const end = session?.endTime ? new Date(session.endTime) : null;
+    const now = new Date();
+    if (!start || !end) {
+      return { label: 'Upcoming', badgeClass: 'bg-amber-50 text-amber-700', isUpcoming: true, isLive: false, isCompleted: false, joinAllowed: false, countdown: 'Waiting for session time' };
+    }
+    if (session?.status === 'cancelled') {
+      return { label: 'Cancelled', badgeClass: 'bg-red-100 text-red-700', isUpcoming: false, isLive: false, isCompleted: false, joinAllowed: false, countdown: 'Cancelled' };
+    }
+    if (now < start) {
+      const diffMs = start - now;
+      const diffMinutes = Math.max(1, Math.ceil(diffMs / 60000));
+      return { label: 'Upcoming', badgeClass: 'bg-amber-50 text-amber-700', isUpcoming: true, isLive: false, isCompleted: false, joinAllowed: false, countdown: `Starts in ${diffMinutes} minutes` };
+    }
+    if (now >= start && now < end) {
+      return { label: 'Live', badgeClass: 'bg-emerald-50 text-emerald-700', isUpcoming: false, isLive: true, isCompleted: false, joinAllowed: true, countdown: 'Live now' };
+    }
+    return { label: 'Completed', badgeClass: 'bg-slate-200 text-slate-700', isUpcoming: false, isLive: false, isCompleted: true, joinAllowed: false, countdown: `Session ended at ${end.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` };
   };
 
   const handleCompleteSession = async (sessionId) => {
@@ -247,6 +305,24 @@ export default function MentorDashboard() {
     } catch (e) {
       console.error(e);
       setError('Failed to complete session');
+    }
+  };
+
+  const handleCloseSession = async (sessionId) => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/session/close', {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.msg || 'Failed to close session');
+      setSuccess('Session closed successfully.');
+      fetchData();
+    } catch (e) {
+      console.error(e);
+      setError(e.message || 'Failed to close session');
     }
   };
 
@@ -341,25 +417,42 @@ export default function MentorDashboard() {
           <div>
             <Card>
               <h4 className="text-lg font-semibold mb-3">Upcoming Sessions</h4>
-              {sessions.filter(s => ['scheduled', 'in-progress'].includes(s.status)).length === 0 ? (
+              {sessions.filter(s => ['scheduled', 'live', 'completed'].includes(s.status) || new Date(s.startTime || s.scheduledAt) > new Date()).length === 0 ? (
                 <div className="text-sm text-slate-500">No upcoming sessions.</div>
               ) : (
                 <div className="space-y-3">
-                  {sessions.filter(s => ['scheduled', 'in-progress'].includes(s.status)).slice(0, 5).map(s => (
-                    <div key={s._id} className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="font-medium">{s.learner?.name}</div>
-                        <div className="text-xs text-slate-500">{s.skillTopic?.skillName}</div>
-                        <div className="text-xs text-slate-400">{s.scheduledAt ? new Date(s.scheduledAt).toLocaleString() : 'Pending'}</div>
+                  {sessions.filter(s => ['scheduled', 'live', 'completed'].includes(s.status) || new Date(s.startTime || s.scheduledAt) > new Date()).slice(0, 5).map(s => {
+                    const state = getSessionWindow(s);
+                    const start = s.startTime ? new Date(s.startTime) : s.scheduledAt ? new Date(s.scheduledAt) : null;
+                    const end = s.endTime ? new Date(s.endTime) : null;
+                    const participants = getSessionParticipants(s);
+                    return (
+                      <div key={s._id} className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="font-medium">{s.skillTopic?.skillName || 'Session'}</div>
+                          <div className="text-xs text-slate-500">Learners: {participants.map((participant) => participant.name).join(', ') || s.learner?.name}</div>
+                          <div className="text-xs text-slate-500">{start ? start.toLocaleDateString() : 'No date'} • {start ? `${start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} - ${end ? end.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '—'}` : 'TBD'}</div>
+                          <div className="mt-1 text-xs font-medium text-slate-600">{state.label}</div>
+                          <div className="text-[11px] text-slate-500">{state.countdown}</div>
+                        </div>
+                        <div className="text-right">
+                          {state.isLive ? (
+                            <button onClick={() => window.open(s.meetingLink || '#', '_blank')} disabled={!s.meetingLink} className="mt-2 text-sm rounded-full bg-emerald-600 text-white px-3 py-1.5 disabled:opacity-50">Join Session</button>
+                          ) : state.isUpcoming ? (
+                            <button disabled className="mt-2 text-sm rounded-full bg-slate-200 text-slate-500 px-3 py-1.5">Join Session - Disabled</button>
+                          ) : (
+                            <button disabled className="mt-2 text-sm rounded-full bg-slate-200 text-slate-500 px-3 py-1.5">Session Ended</button>
+                          )}
+                          {state.isLive && (
+                            <button onClick={() => handleCloseSession(s._id)} className="mt-2 block text-xs text-amber-700">Close session early</button>
+                          )}
+                          {state.isCompleted && (
+                            <button onClick={() => handleCompleteSession(s._id)} className="mt-2 block text-xs text-indigo-600">Finalize completion</button>
+                          )}
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <div className="text-xs uppercase tracking-wide text-slate-400">{s.status}</div>
-                        {s.status === 'in-progress' && (
-                          <button onClick={() => handleCompleteSession(s._id)} className="mt-2 text-sm text-indigo-600">Mark complete</button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </Card>
@@ -386,6 +479,10 @@ export default function MentorDashboard() {
               )}
             </Card>
           </div>
+        </div>
+
+        <div className="mt-6">
+          <MentorAvailabilityCalendar sessions={sessions} />
         </div>
       </div>
 
@@ -422,7 +519,51 @@ export default function MentorDashboard() {
               <input type="time" value={time} onChange={e => setTime(e.target.value)} className="w-full px-3 py-2 border rounded-md" />
             </div>
           </div>
-          <div className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-600">A Google Calendar event and Google Meet link will be created for you and the learner.</div>
+          <div>
+            <label className="block text-sm text-slate-600 mb-1">Session duration (minutes)</label>
+            <select value={duration} onChange={(e) => setDuration(Number(e.target.value))} className="w-full px-3 py-2 border rounded-md bg-white">
+              {[15, 30, 45, 60, 90, 120, 180, 240].map((option) => (
+                <option key={option} value={option}>{option} minutes</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm text-slate-600 mb-2">Learners for this session</label>
+            <div className="space-y-2 max-h-44 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2">
+              {learners.length === 0 ? (
+                <div className="text-sm text-slate-500">No learners available yet.</div>
+              ) : (
+                learners.map((learner) => {
+                  const id = learner._id || learner.id;
+                  const checked = selectedLearners.includes(String(id));
+                  return (
+                    <label key={id} className="flex items-center gap-3 rounded-md bg-white px-2 py-2 shadow-sm">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => {
+                          setSelectedLearners((current) => {
+                            const next = new Set(current.map(String));
+                            if (next.has(String(id))) next.delete(String(id));
+                            else next.add(String(id));
+                            return [...next];
+                          });
+                        }}
+                      />
+                      <div className="flex items-center gap-2">
+                        <Avatar src={learner.photo} name={learner.name} size={8} />
+                        <div>
+                          <div className="text-sm font-medium text-slate-800">{learner.name}</div>
+                          <div className="text-[11px] text-slate-500">{learner.email}</div>
+                        </div>
+                      </div>
+                    </label>
+                  );
+                })
+              )}
+            </div>
+          </div>
+          <div className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-600">A single Google Calendar event and shared Meet link will be created for all selected learners.</div>
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setShowScheduleModal(false)}>Cancel</Button>
             <Button onClick={schedule}>Confirm</Button>

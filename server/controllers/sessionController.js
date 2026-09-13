@@ -4,6 +4,127 @@ const User = require("../models/User");
 const { sendMail } = require("../services/email");
 const { createCalendarEvent } = require("../services/googleOAuth");
 
+const normalizeDurationMinutes = (value) => {
+  if (value === undefined || value === null || value === '') return null;
+  const minutes = Number(value);
+  if (!Number.isFinite(minutes)) return null;
+  const safeMinutes = Math.round(minutes);
+  if (safeMinutes < 15 || safeMinutes > 240) return null;
+  return safeMinutes;
+};
+
+const buildSessionWindow = (session, currentTime = new Date()) => {
+  const now = new Date(currentTime);
+  const startTime = session?.startTime ? new Date(session.startTime) : null;
+  const endTime = session?.endTime ? new Date(session.endTime) : null;
+
+  if (!startTime || !endTime) {
+    return {
+      isUpcoming: false,
+      isLive: false,
+      isCompleted: false,
+      isCancelled: session?.status === 'cancelled',
+      joinAllowed: false,
+      canReview: false,
+    };
+  }
+
+  if (session?.status === 'cancelled') {
+    return {
+      isUpcoming: false,
+      isLive: false,
+      isCompleted: false,
+      isCancelled: true,
+      joinAllowed: false,
+      canReview: false,
+    };
+  }
+
+  const isUpcoming = now < startTime;
+  const isLive = now >= startTime && now < endTime;
+  const isCompleted = now >= endTime;
+
+  return {
+    isUpcoming,
+    isLive,
+    isCompleted,
+    isCancelled: false,
+    joinAllowed: isLive,
+    canReview: isCompleted || Boolean(session?.closedAt),
+  };
+};
+
+const getSessionWindowState = (session) => buildSessionWindow(session, new Date());
+
+const getSessionLearnerIds = (session = {}) => {
+  const rawLearners = [];
+  if (session.learner) rawLearners.push(session.learner);
+  if (Array.isArray(session.learners)) rawLearners.push(...session.learners);
+
+  return [...new Set(rawLearners.filter(Boolean).map((id) => id && id.toString ? id.toString() : String(id)))];
+};
+
+const isSessionParticipant = (session, userId) => {
+  if (!session || !userId) return false;
+  const userIdStr = String(userId);
+  const mentorId = session.mentor && session.mentor.toString ? session.mentor.toString() : String(session.mentor || '');
+  const learnerIds = getSessionLearnerIds(session);
+  return mentorId === userIdStr || learnerIds.includes(userIdStr);
+};
+
+const ensureSessionWindow = (session, userId) => {
+  if (!session) {
+    return { allowed: false, status: 404, message: 'Session not found' };
+  }
+
+  if (session.status === 'cancelled') {
+    return { allowed: false, status: 400, message: 'This session has been cancelled.' };
+  }
+
+  const mentorId = session.mentor && session.mentor.toString ? session.mentor.toString() : session.mentor;
+  const isAuthorized = isSessionParticipant(session, userId) || mentorId === userId;
+
+  if (!isAuthorized) {
+    return { allowed: false, status: 403, message: 'You are not authorized to access this session.' };
+  }
+
+  const { isUpcoming, isLive, isCompleted, isCancelled } = getSessionWindowState(session);
+
+  if (isCancelled) {
+    return { allowed: false, status: 400, message: 'This session has been cancelled.' };
+  }
+
+  if (isUpcoming) {
+    return { allowed: false, status: 400, message: "Session hasn't started yet." };
+  }
+
+  if (isCompleted) {
+    return { allowed: false, status: 400, message: 'This session has ended and can no longer be joined.' };
+  }
+
+  if (!isLive) {
+    return { allowed: false, status: 400, message: 'Session is not currently active.' };
+  }
+
+  return { allowed: true, status: 200, message: 'Join allowed' };
+};
+
+const normalizeSessionStatus = (session) => {
+  if (!session) return 'pending';
+  if (session.status === 'cancelled') return 'cancelled';
+  if (session.status === 'rejected') return 'rejected';
+
+  const now = new Date();
+  const startTime = session.startTime ? new Date(session.startTime) : null;
+  const endTime = session.endTime ? new Date(session.endTime) : null;
+
+  if (session.closedAt) return 'completed';
+  if (startTime && endTime && now < startTime) return 'scheduled';
+  if (startTime && endTime && now >= startTime && now < endTime) return 'live';
+  if (startTime && endTime && now >= endTime) return 'completed';
+  return session.status || 'scheduled';
+};
+
 /* =========================================
    GET ALL SESSIONS
 ========================================= */
@@ -12,12 +133,24 @@ exports.getSessions = async (req, res) => {
     const userId = req.user.id;
 
     const sessions = await Session.find({
-      $or: [{ learner: userId }, { mentor: userId }]
+      $or: [{ learner: userId }, { learners: userId }, { mentor: userId }]
     })
       .populate("learner", "name email photo")
+      .populate("learners", "name email photo")
       .populate("mentor", "name email photo")
       .populate("skillTopic", "skillName")
       .sort({ createdAt: -1 });
+
+    for (const session of sessions) {
+      const nextStatus = normalizeSessionStatus(session);
+      if (session.status !== nextStatus && !['pending', 'accepted'].includes(session.status) && nextStatus !== 'scheduled') {
+        session.status = nextStatus;
+        if (nextStatus === 'completed' && !session.completedAt) {
+          session.completedAt = new Date();
+        }
+        await session.save();
+      }
+    }
 
     res.json(sessions);
   } catch (error) {
@@ -68,7 +201,8 @@ exports.createSessionRequest = async (req, res) => {
       console.warn('Failed to send new request email to mentor:', mailErr && mailErr.message);
     }
   } catch (error) {
-    res.status(500).json({ msg: "Failed to send request" });
+    console.error('createSessionRequest error:', error && error.stack ? error.stack : error);
+    res.status(500).json({ msg: error && error.message ? error.message : "Failed to send request" });
   }
 };
 
@@ -78,9 +212,8 @@ exports.createSessionRequest = async (req, res) => {
 exports.acceptAndSchedule = async (req, res) => {
   try {
     const mentorId = req.user.id;
-    // sessionId may be provided in params or body
     const sessionId = req.params && req.params.id ? req.params.id : req.body.sessionId;
-    const { date, time, note } = req.body;
+    const { date, time, note, duration, learners } = req.body;
 
     const session = await Session.findById(sessionId);
 
@@ -92,9 +225,13 @@ exports.acceptAndSchedule = async (req, res) => {
       return res.status(403).json({ msg: "Unauthorized" });
     }
 
-    // Validate date/time inputs
     if (!date || !time) {
       return res.status(400).json({ msg: "Date and time are required" });
+    }
+
+    const durationMinutes = normalizeDurationMinutes(duration);
+    if (!durationMinutes) {
+      return res.status(400).json({ msg: "A valid session duration is required. Select 15-240 minutes." });
     }
 
     const parsed = new Date(`${date}T${time}`);
@@ -107,12 +244,28 @@ exports.acceptAndSchedule = async (req, res) => {
       return res.status(400).json({ msg: "Cannot schedule sessions in the past" });
     }
 
+    const endTime = new Date(parsed.getTime() + durationMinutes * 60 * 1000);
+
     session.scheduledAt = parsed;
+    session.startTime = parsed;
+    session.duration = durationMinutes;
+    session.endTime = endTime;
+    session.closedAt = null;
+    session.closedBy = null;
+
+    const selectedLearnerIds = Array.isArray(learners) ? learners : [session.learner];
+    const uniqueLearnerIds = [...new Set(selectedLearnerIds.filter(Boolean).map((id) => String(id)))];
+    if (!uniqueLearnerIds.length) {
+      return res.status(400).json({ msg: "At least one learner is required for the session." });
+    }
+
+    session.learners = uniqueLearnerIds.map((id) => id);
+    session.learner = session.learner || uniqueLearnerIds[0];
 
     const mentor = await User.findById(mentorId);
-    const learner = await User.findById(session.learner).select("name email");
+    const learnerUsers = await User.find({ _id: { $in: uniqueLearnerIds } }).select("name email");
     const skill = await Skill.findById(session.skillTopic).select("skillName");
-    if (!mentor || !learner) return res.status(404).json({ msg: "Session participants not found" });
+    if (!mentor || learnerUsers.length === 0) return res.status(404).json({ msg: "Session participants not found" });
 
     let calendarEvent;
     try {
@@ -121,8 +274,8 @@ exports.acceptAndSchedule = async (req, res) => {
         summary: `SkillSwap teaching session: ${skill?.skillName || "Teaching"}`,
         description: note || "SkillSwap teaching session",
         startTime: parsed,
-        endTime: new Date(parsed.getTime() + 60 * 60 * 1000),
-        attendeeEmail: learner.email,
+        endTime: new Date(parsed.getTime() + session.duration * 60 * 1000),
+        attendeeEmails: learnerUsers.map((learner) => learner.email).filter(Boolean),
         existingEventId: session.googleCalendarEventId,
       });
     } catch (calendarError) {
@@ -132,6 +285,17 @@ exports.acceptAndSchedule = async (req, res) => {
     session.meetingLink = calendarEvent.hangoutLink || calendarEvent.conferenceData?.entryPoints?.find((entry) => entry.entryPointType === "video")?.uri || "";
     session.googleCalendarEventId = calendarEvent.id;
     session.status = "scheduled";
+    if (session.startTime && session.endTime) {
+      const now = new Date();
+      if (now < session.startTime) {
+        session.status = 'scheduled';
+      } else if (now >= session.startTime && now < session.endTime) {
+        session.status = 'live';
+      } else {
+        session.status = 'completed';
+        session.completedAt = session.completedAt || new Date();
+      }
+    }
     // save optional note
     if (note) session.mentorNote = note;
 
@@ -139,56 +303,58 @@ exports.acceptAndSchedule = async (req, res) => {
 
     const updated = await Session.findById(sessionId)
       .populate("learner", "name email photo")
+      .populate("learners", "name email photo")
       .populate("mentor", "name email photo")
       .populate("skillTopic", "skillName");
 
-    // Send email notification to learner and mentor
     try {
-      const learner = updated.learner;
       const mentor = updated.mentor;
       const skill = updated.skillTopic?.skillName || "";
       const dateStr = updated.scheduledAt.toLocaleDateString();
       const timeStr = updated.scheduledAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const templates = require('../services/emailTemplates');
-      const learnerHtml = templates.sessionScheduledLearner({ learnerName: learner.name, mentorName: mentor.name, skill, dateStr, timeStr, meetingLink: updated.meetingLink, note: updated.mentorNote });
-      await sendMail({ to: learner.email, subject: 'Session Scheduled Successfully', html: learnerHtml });
 
-      const mentorHtml = templates.sessionScheduledMentor({ learnerName: learner.name, mentorName: mentor.name, skill, dateStr, timeStr, meetingLink: updated.meetingLink });
+      for (const learner of updated.learners || []) {
+        const learnerName = learner?.name || 'Learner';
+        const learnerHtml = templates.sessionScheduledLearner({ learnerName, mentorName: mentor.name, skill, dateStr, timeStr, meetingLink: updated.meetingLink, note: updated.mentorNote });
+        await sendMail({ to: learner.email, subject: 'Session Scheduled Successfully', html: learnerHtml });
+      }
+
+      const mentorHtml = templates.sessionScheduledMentor({ learnerName: (updated.learners && updated.learners[0]?.name) || updated.learner?.name || 'Learner', mentorName: mentor.name, skill, dateStr, timeStr, meetingLink: updated.meetingLink });
       await sendMail({ to: mentor.email, subject: 'Session Scheduled with Learner', html: mentorHtml });
     } catch (mailErr) {
       console.warn('Failed to send session email(s):', mailErr && mailErr.message ? mailErr.message : mailErr);
     }
 
-    // Also create a chat message with the meeting link (so learner receives link in chat)
     try {
       const Message = require('../models/Message');
       const socketServer = require('../socket');
       const senderId = updated.mentor._id.toString();
-      const receiverId = updated.learner._id.toString();
-      const chatId = [senderId, receiverId].sort().join('_');
-      const text = `Your session has been scheduled for ${updated.scheduledAt.toLocaleDateString()} at ${updated.scheduledAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.\nMeeting Link: ${updated.meetingLink}`;
+      const participants = [...new Set([(updated.learner?._id || updated.learner)?.toString(), ...(updated.learners || []).map((learner) => learner?._id?.toString()).filter(Boolean)])];
 
-      const msgDoc = await Message.create({ chatId, sender: senderId, receiver: receiverId, text, isRead: false });
+      for (const receiverId of participants) {
+        if (!receiverId || receiverId === senderId) continue;
+        const chatId = [senderId, receiverId].sort().join('_');
+        const text = `Your session has been scheduled for ${updated.scheduledAt.toLocaleDateString()} at ${updated.scheduledAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.\nMeeting Link: ${updated.meetingLink}`;
 
-      // populate sender/receiver for emit
-      await msgDoc.populate('sender', 'name photo');
-      await msgDoc.populate('receiver', 'name photo');
+        const msgDoc = await Message.create({ chatId, sender: senderId, receiver: receiverId, text, isRead: false });
+        await msgDoc.populate('sender', 'name photo');
+        await msgDoc.populate('receiver', 'name photo');
 
-      // Normalize message for socket emit
-      const emittedMessage = {
-        _id: msgDoc._id.toString(),
-        sender: { _id: msgDoc.sender._id.toString(), name: msgDoc.sender.name, photo: msgDoc.sender.photo },
-        receiver: { _id: msgDoc.receiver._id.toString(), name: msgDoc.receiver.name, photo: msgDoc.receiver.photo },
-        text: msgDoc.text,
-        createdAt: msgDoc.createdAt,
-        isRead: msgDoc.isRead
-      };
+        const emittedMessage = {
+          _id: msgDoc._id.toString(),
+          sender: { _id: msgDoc.sender._id.toString(), name: msgDoc.sender.name, photo: msgDoc.sender.photo },
+          receiver: { _id: msgDoc.receiver._id.toString(), name: msgDoc.receiver.name, photo: msgDoc.receiver.photo },
+          text: msgDoc.text,
+          createdAt: msgDoc.createdAt,
+          isRead: msgDoc.isRead
+        };
 
-      const io = socketServer.getIO && socketServer.getIO();
-      const roomId = chatId;
-      if (io) {
-        io.to(roomId).emit('receive_message', emittedMessage);
-        io.to(`user_${receiverId}`).emit('message_received', { from: senderId, message: emittedMessage });
+        const io = socketServer.getIO && socketServer.getIO();
+        if (io) {
+          io.to(chatId).emit('receive_message', emittedMessage);
+          io.to(`user_${receiverId}`).emit('message_received', { from: senderId, message: emittedMessage });
+        }
       }
     } catch (msgErr) {
       console.warn('Failed to send chat message with meeting link:', msgErr && msgErr.message ? msgErr.message : msgErr);
@@ -256,18 +422,67 @@ exports.completeSession = async (req, res) => {
     const session = await Session.findById(sessionId);
     if (!session) return res.status(404).json({ msg: "Session not found" });
 
+    const now = new Date();
+    const startTime = session.startTime ? new Date(session.startTime) : null;
+    const endTime = session.endTime ? new Date(session.endTime) : null;
+
+    if (startTime && endTime && now < endTime && session.closedAt === null) {
+      return res.status(400).json({ success: false, message: 'Session cannot be completed before its scheduled end time.' });
+    }
+
     session.status = "completed";
     session.completedAt = new Date();
+    session.closedAt = session.closedAt || new Date();
+    session.closedBy = session.closedBy || session.mentor;
+    if (!session.startTime) session.startTime = session.scheduledAt || new Date();
+    if (!session.endTime) {
+      const durationMinutes = normalizeDurationMinutes(session.duration) || 60;
+      session.endTime = new Date((session.startTime || new Date()).getTime() + durationMinutes * 60 * 1000);
+    }
     await session.save();
 
-    // Increment learner's sessionsCompleted
     try {
-      await User.findByIdAndUpdate(session.learner, { $inc: { sessionsCompleted: 1 } });
+      const learnerIds = [...new Set([
+        session.learner,
+        ...(Array.isArray(session.learners) ? session.learners : [])
+      ].filter(Boolean).map((id) => String(id)))];
+
+      if (learnerIds.length) {
+        await User.updateMany({ _id: { $in: learnerIds } }, { $inc: { sessionsCompleted: 1 } });
+      }
     } catch (e) {
       console.error("Error incrementing sessionsCompleted:", e.message);
     }
 
-    res.json({ msg: "Session completed", session });
+    res.json({ success: true, msg: "Session completed", session });
+  } catch (err) {
+    res.status(500).json({ msg: err.message });
+  }
+};
+
+exports.closeSession = async (req, res) => {
+  try {
+    const { sessionId } = req.body || req.params;
+    const userId = req.user?.id;
+    const session = await Session.findById(sessionId);
+    if (!session) return res.status(404).json({ msg: "Session not found" });
+
+    if (session.mentor.toString() !== userId) {
+      return res.status(403).json({ msg: "Only the mentor can close a session early." });
+    }
+
+    session.closedAt = new Date();
+    session.closedBy = userId;
+    session.status = 'completed';
+    session.completedAt = session.completedAt || session.closedAt;
+    if (!session.endTime) {
+      const startTime = session.startTime ? new Date(session.startTime) : new Date();
+      const durationMinutes = normalizeDurationMinutes(session.duration) || 60;
+      session.endTime = new Date(startTime.getTime() + durationMinutes * 60 * 1000);
+    }
+    await session.save();
+
+    res.json({ success: true, msg: 'Session closed early', session });
   } catch (err) {
     res.status(500).json({ msg: err.message });
   }
@@ -314,19 +529,18 @@ exports.startSession = async (req, res) => {
     const session = await Session.findById(sessionId);
     if (!session) return res.status(404).json({ msg: "Session not found" });
 
-    // Only learner for this session may start it
-    if (session.learner.toString() !== userId) {
-      return res.status(403).json({ msg: "Unauthorized - only the learner can start this session" });
+    if (!isSessionParticipant(session, userId)) {
+      return res.status(403).json({ msg: "Unauthorized - only a participant can start this session" });
     }
 
-    // Only start if session is scheduled
-    if (session.status !== "scheduled") {
-      return res.status(400).json({ msg: `Session cannot be started. Current status: ${session.status}` });
+    const validation = ensureSessionWindow(session, userId);
+    if (!validation.allowed) {
+      return res.status(validation.status).json({ success: false, message: validation.message });
     }
 
-    // Mark session as in-progress and record start time
-    session.status = "in-progress";
+    session.status = 'live';
     session.startedAt = new Date();
+    session.completedAt = null;
     await session.save();
 
     const updated = await Session.findById(sessionId)
@@ -334,7 +548,7 @@ exports.startSession = async (req, res) => {
       .populate("mentor", "name email photo")
       .populate("skillTopic", "skillName");
 
-    res.json({ msg: "Session started", session: updated });
+    res.json({ success: true, msg: "Session started", session: updated });
   } catch (err) {
     res.status(500).json({ msg: err.message });
   }
@@ -389,4 +603,15 @@ exports.acceptOrSchedule = async (req, res) => {
     console.error('Error in acceptOrSchedule:', err);
     res.status(500).json({ msg: 'Failed to process accept/schedule', error: err.message });
   }
+};
+
+module.exports = {
+  ...module.exports,
+  getSessionWindowState,
+  ensureSessionWindow,
+  normalizeSessionStatus,
+  normalizeDurationMinutes,
+  buildSessionWindow,
+  getSessionLearnerIds,
+  isSessionParticipant,
 };

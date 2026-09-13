@@ -7,6 +7,7 @@ router.post('/', auth, requireRole('learner'), reviewController.createReview);
 router.get('/me', auth, reviewController.getMyReviews);
 router.get('/mentor/:mentorId', auth, reviewController.getMentorReviews);
 router.get('/session/:sessionId', auth, reviewController.getSessionReview);
+router.get('/session/:sessionId/status', auth, reviewController.getReviewStatus);
 router.put('/:id', auth, requireRole('learner'), reviewController.editReview);
 router.delete('/:id', auth, requireRole('admin'), reviewController.deleteReview);
 router.get('/stats/:mentorId', auth, reviewController.getMentorStats);

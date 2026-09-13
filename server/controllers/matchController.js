@@ -130,6 +130,7 @@ exports.acceptRequest = async (req, res) => {
     // Create a session
     const newSession = new Session({
       learner: request.learner,
+      learners: [request.learner],
       mentor: request.mentor,
       skillTopic: request.skillTopic,
       skillRequest: request._id,
@@ -213,10 +214,11 @@ exports.createSession = async (req, res) => {
 exports.getSessions = async (req, res) => {
   try {
     const sessions = await Session.find({
-      $or: [{ mentor: req.user.id }, { learner: req.user.id }]
+      $or: [{ mentor: req.user.id }, { learner: req.user.id }, { learners: req.user.id }]
     })
       .populate("mentor", "name photo")
       .populate("learner", "name photo")
+      .populate("learners", "name photo email")
       .populate("skillTopic", "skillName")
       .sort({ createdAt: -1 });
     res.json(sessions);
@@ -275,8 +277,14 @@ exports.completeSession = async (req, res) => {
     session.completedAt = new Date();
     await session.save();
 
-    // Increment learner's sessionsCompleted
-    await User.findByIdAndUpdate(session.learner, { $inc: { sessionsCompleted: 1 } });
+    const learnerIds = [...new Set([
+      session.learner,
+      ...(Array.isArray(session.learners) ? session.learners : [])
+    ].filter(Boolean).map((id) => String(id)))];
+
+    if (learnerIds.length) {
+      await User.updateMany({ _id: { $in: learnerIds } }, { $inc: { sessionsCompleted: 1 } });
+    }
 
     res.json({ message: "Session completed", session });
   } catch (err) {

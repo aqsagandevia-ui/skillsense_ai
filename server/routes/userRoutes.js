@@ -1,10 +1,10 @@
 const router = require("express").Router();
 const auth = require("../middleware/auth");
-const { 
-  getProfile, 
-  updateProfile, 
-  getMentors, 
-  getAllUsers, 
+const {
+  getProfile,
+  updateProfile,
+  getMentors,
+  getAllUsers,
   getUserById,
   searchUsers,
   getLearningHistory,
@@ -20,6 +20,7 @@ const {
 router.get("/me", auth, getProfile);
 router.get("/mentors", auth, getMentors);
 router.get("/all", auth, getAllUsers);
+router.get("/", auth, getAllUsers);
 router.get("/learners", auth, getLearners);
 router.get("/search", auth, searchUsers);
 router.get("/learning-history", auth, getLearningHistory);

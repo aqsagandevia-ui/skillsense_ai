@@ -43,33 +43,11 @@ export default function App() {
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/oauth-callback" element={<OAuthCallback />} />
 
-          <Route
-            path="/skill/:title"
-            element={
-              <ProtectedRoute>
-                <SkillDetails />
-              </ProtectedRoute>
-            }
-          />
-          {/* 🔐 Protected Skill Details (IMPORTANT FIX) */}
-          <Route
-            path="/skill-details"
-            element={
-              <ProtectedRoute>
-                <SkillDetails />
-              </ProtectedRoute>
-            }
-          />
+          <Route path="/skill/:title" element={<SkillDetails />} />
+          <Route path="/skill-details" element={<SkillDetails />} />
 
-          {/* 🔐 Other Protected Routes */}
-          <Route
-            path="/browse"
-            element={
-              <ProtectedRoute>
-                <BrowseSkills />
-              </ProtectedRoute>
-            }
-          />
+          {/* Public browsing routes: users can explore skills before signing in */}
+          <Route path="/browse" element={<BrowseSkills />} />
 
           <Route
             path="/profile"
@@ -161,14 +139,7 @@ export default function App() {
             }
           />
 
-          <Route
-            path="/mentor/:id"
-            element={
-              <ProtectedRoute>
-                <MentorProfile />
-              </ProtectedRoute>
-            }
-          />
+          <Route path="/mentor/:id" element={<MentorProfile />} />
 
           {/* 🔁 Redirect unknown routes */}
           <Route path="*" element={<Navigate to="/" replace />} />
